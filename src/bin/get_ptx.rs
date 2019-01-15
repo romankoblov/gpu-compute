@@ -67,7 +67,7 @@ fn main() {
 
     let cp = gpu_compute::Compute::new();
     for (idx, d) in cp.list_devices(){
-        if d.vendor() != gpu_compute::enums::ComputeVendor::NVIDIA { continue; }
+        if d.vendor() != gpu_compute::enums::Vendor::NVIDIA { continue; }
         let q = d.queue();
         let program = q.program_builder()
             .debug()

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use ansi_term::Colour;
-use crate::enums::{ComputeVendor};
+use crate::enums::{Vendor};
 
 pub trait ComputePlatform {
     // Static method signature; `Self` refers to the implementor type.
@@ -27,8 +27,8 @@ impl<'a> std::fmt::Debug for ComputePlatform + 'a {
 pub trait ComputeDevice {
     fn name(&self) -> String;
     fn priority(&self) -> usize { 0 }
-    fn vendor(&self) -> ComputeVendor;
-    fn platform_vendor(&self) -> ComputeVendor;
+    fn vendor(&self) -> Vendor;
+    fn platform_vendor(&self) -> Vendor;
     fn details(&self) -> String;
     fn platform(&self) -> &dyn ComputePlatform;
     fn queue<'a>(&'a self) -> Box<dyn ComputeQueue + 'a>;

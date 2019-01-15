@@ -11,7 +11,7 @@ use nvrtc;
 use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, 
     ComputeProgramBuilder, ComputeProgram, PtxFunctionInfo};
 use crate::error::{ComputeError, ComputeResult};
-use crate::enums::{ComputeVendor};
+use crate::enums::{Vendor};
 
 pub struct CudaPlatform {}
 
@@ -75,8 +75,8 @@ impl<'a> CudaDevice<'a> {
 
 impl<'a> ComputeDevice for CudaDevice<'a> {
     fn name(&self) -> String { format!("{}", self.cuda_device.name().unwrap()) }
-    fn vendor(&self) -> ComputeVendor { ComputeVendor::NVIDIA }
-    fn platform_vendor(&self) -> ComputeVendor { ComputeVendor::NVIDIA }
+    fn vendor(&self) -> Vendor { Vendor::NVIDIA }
+    fn platform_vendor(&self) -> Vendor { Vendor::NVIDIA }
     fn platform(&self) -> &dyn ComputePlatform { self.platform }
     fn details(&self) -> String { format!("Not implemented") }
     fn queue<'b>(&'b self) -> Box<dyn ComputeQueue + 'b> {

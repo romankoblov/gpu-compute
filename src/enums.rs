@@ -1,5 +1,5 @@
 #[derive(PartialEq, Display, Debug)]
-pub enum ComputeVendor {
+pub enum Vendor {
     NVIDIA,
     AMD,
     Intel,
@@ -7,14 +7,14 @@ pub enum ComputeVendor {
     Generic,
 }
 
-impl ComputeVendor {
-    pub fn parse(platform: &str) -> ComputeVendor {
+impl Vendor {
+    pub fn parse(platform: &str) -> Vendor {
         match platform {
-            "NVIDIA Corporation" | "NVIDIA" => ComputeVendor::NVIDIA,
-            "Advanced Micro Devices, Inc." | "AuthenticAMD" | "AMD" => ComputeVendor::AMD,
-            "GenuineIntel" | "Intel" | "Intel(R) Corporation" => ComputeVendor::Intel,
-            "Apple" => ComputeVendor::Apple,
-            _ => ComputeVendor::Generic,
+            "NVIDIA Corporation" | "NVIDIA" => Vendor::NVIDIA,
+            "Advanced Micro Devices, Inc." | "AuthenticAMD" | "AMD" => Vendor::AMD,
+            "GenuineIntel" | "Intel" | "Intel(R) Corporation" => Vendor::Intel,
+            "Apple" => Vendor::Apple,
+            _ => Vendor::Generic,
         }
     }
 }

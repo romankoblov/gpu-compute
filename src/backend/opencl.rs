@@ -13,7 +13,7 @@ use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue,
     ComputeProgramBuilder, ComputeProgram, PtxFunctionInfo};
 use crate::util;
 use crate::error::{ComputeResult, ComputeError};
-use crate::enums::{ComputeVendor};
+use crate::enums::{Vendor};
 
 // Convert the info or error to a string for printing:
 macro_rules! ocl_to_string {
@@ -107,13 +107,13 @@ impl<'a> ComputeDevice for OclDevice<'a> {
         priority
     }
 
-    fn platform_vendor(&self) -> ComputeVendor {
-        ComputeVendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
+    fn platform_vendor(&self) -> Vendor {
+        Vendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
     }
 
 
-    fn vendor(&self) -> ComputeVendor {
-        ComputeVendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
+    fn vendor(&self) -> Vendor {
+        Vendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
     }
 
     fn details(&self) -> String {
@@ -272,7 +272,7 @@ impl<'a> ComputeProgramBuilder<'a> for OclProgramBuilder<'a> {
     }
     fn debug(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
         self.debug = true;
-        if self.queue.device.vendor() == ComputeVendor::NVIDIA {
+        if self.queue.device.vendor() == Vendor::NVIDIA {
             self.compiler_opt("-cl-nv-verbose");
         }
         self
