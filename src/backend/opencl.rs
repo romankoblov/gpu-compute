@@ -11,7 +11,7 @@ use ocl::core::{self, DeviceInfo, DeviceInfoResult, PlatformInfo, ContextInfo,
 
 use super::generic::{ComputeVendor, ComputePlatform, ComputeDevice, ComputeQueue, 
     ComputeProgramBuilder, ComputeProgram, ComputeError, ComputeResult, PtxFunctionInfo};
-use super::util;
+use crate::util;
 
 // Convert the info or error to a string for printing:
 macro_rules! ocl_to_string {
@@ -106,12 +106,12 @@ impl<'a> ComputeDevice for OclDevice<'a> {
     }
 
     fn platform_vendor(&self) -> ComputeVendor {
-        util::parse_platform(self.ocl_platform.vendor().unwrap().as_ref())
+        ComputeVendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
     }
 
 
     fn vendor(&self) -> ComputeVendor {
-        util::parse_platform(self.ocl_platform.vendor().unwrap().as_ref())
+        ComputeVendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
     }
 
     fn details(&self) -> String {
@@ -254,8 +254,8 @@ impl <'a> OclProgramBuilder<'a> {
             &h_programs_ptr[..], 
             &headers_names, 
             None, None, None)).unwrap();
-        // TODO: expose link options?
-        let linked = core::link_program(ctx, Some(&[device]), &CString::new("-cl-nv-verbose").unwrap(), &[&program], 
+        // TODO: expose link options?                         // -cl-nv-verbose -- doesn't work
+        let linked = core::link_program(ctx, Some(&[device]), &CString::new("").unwrap(), &[&program], 
             None, None, None).unwrap();
         println!("PROGRAM: {:?}", self.get_build_log(&program));
         Ok(Box::new(OclProgram::new(self.queue, ocl::Program::from(linked))))
@@ -283,7 +283,7 @@ impl<'a> ComputeProgramBuilder<'a> for OclProgramBuilder<'a> {
     fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
         self.add_header(self.vendor_header().as_str(), "/gpu_compute/vendor.h");
         self.add_header(self.cache_header(self.debug).as_str(), "/gpu_compute/cache.h");
-        self.add_header(&include_str!("../headers/opencl.cl"), "/gpu_compute/platform.h");
+        self.add_header(&include_str!("../../headers/opencl.cl"), "/gpu_compute/platform.h");
         self
     }
     fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {

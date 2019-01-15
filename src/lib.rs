@@ -1,12 +1,10 @@
 #[macro_use] extern crate strum_macros;
 use log::*;
 
-pub mod generic;
+pub mod backend;
 pub mod util;
-pub mod cuda;
-pub mod opencl;
 
-use self::generic::{ComputeDevice, ComputePlatform};
+use self::backend::generic::{ComputeDevice, ComputePlatform};
 
 pub struct Compute {
     pub backends: Vec<Box<dyn ComputePlatform>>,
@@ -26,8 +24,8 @@ macro_rules! platform_init {
 impl Compute {
     pub fn new() -> Compute {
         let mut backends: Vec<Box<dyn ComputePlatform>> = vec![];
-        platform_init!(backends, crate::cuda::CudaPlatform);
-        platform_init!(backends, crate::opencl::OclPlatform);
+        platform_init!(backends, crate::backend::cuda::CudaPlatform);
+        platform_init!(backends, crate::backend::opencl::OclPlatform);
         Compute { backends }
     }
     fn default_platform(&self) -> &Box<dyn ComputePlatform> {
@@ -116,12 +114,6 @@ pub fn init(){
             a[gid] = 5;
 
         }
-        #ifdef CUDA
-        __global__ void say_hi3()
-        {
-            printf("HI!!!!");
-        }
-        #endif
     "#;
     let x = queue.program_builder()
         .debug()
@@ -129,7 +121,6 @@ pub fn init(){
         .add_header(header, "world.cl")
         .add_fn("say_hi")
         .add_fn("say_hi2")
-        .add_fn("say_hi3")
         .set_source(&kernel)
         .build_source().unwrap();
     //println!("Q: {}", x);

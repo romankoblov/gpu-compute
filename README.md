@@ -56,6 +56,9 @@ Platform
 - Each function in pipeline can have predefined grid structure, which can be
   redefined later.
 - Need to have nice way to pass predefined const to kernel on comp time
+- Device . get_version -> major, minor:
+  - CUDA: returns compute capability
+  - OpenCL: returns supported OpenCL version
 
 API
 ---

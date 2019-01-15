@@ -1,4 +1,3 @@
-
 use std::error::Error;
 use std::ffi::CString;
 use std::collections::HashMap;
@@ -194,7 +193,7 @@ impl<'a> ComputeProgramBuilder<'a> for CudaProgramBuilder<'a> {
     fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
         self.add_header(self.vendor_header().as_str(), "/gpu_compute/vendor.h");
         self.add_header(self.cache_header(self.debug).as_str(), "/gpu_compute/cache.h");
-        self.add_header(&include_str!("../headers/cuda.cu"), "/gpu_compute/platform.h");
+        self.add_header(&include_str!("../../headers/cuda.cu"), "/gpu_compute/platform.h");
         self
     }
     fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
