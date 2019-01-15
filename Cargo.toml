@@ -1,0 +1,21 @@
+[package]
+name = "gpu-compute"
+version = "0.0.2"
+authors = ["Roman Koblov <penpen938@me.com>"]
+edition = "2018"
+description = "Unified GPU computing interface"
+repository = "https://github.com/romankoblov/gpu-compute"
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+ocl = "0.19"
+rustacuda = "0.1"
+rustacuda_derive = "0.1"
+rustacuda_core = "0.1"
+nvrtc = "0.1.2"
+log = "0.4"
+ansi_term = "0.9"
+
+[patch.crates-io]
+ocl = { git = "https://github.com/romankoblov/ocl" }
