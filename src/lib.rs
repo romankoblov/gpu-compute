@@ -1,7 +1,10 @@
 #[macro_use] extern crate strum_macros;
 use log::*;
 
+pub mod error;
+pub mod enums;
 pub mod backend;
+pub mod program;
 pub mod util;
 
 use self::backend::generic::{ComputeDevice, ComputePlatform};

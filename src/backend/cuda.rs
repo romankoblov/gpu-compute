@@ -8,8 +8,10 @@ use rustacuda::device::{Device, DeviceAttribute};
 use rustacuda::function::{Function, FunctionAttribute};
 use nvrtc;
 
-use super::generic::{ComputeVendor, ComputePlatform, ComputeDevice, ComputeQueue, 
-    ComputeProgramBuilder, ComputeProgram, ComputeError, ComputeResult, PtxFunctionInfo};
+use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, 
+    ComputeProgramBuilder, ComputeProgram, PtxFunctionInfo};
+use crate::error::{ComputeError, ComputeResult};
+use crate::enums::{ComputeVendor};
 
 pub struct CudaPlatform {}
 

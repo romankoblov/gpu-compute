@@ -1,48 +1,6 @@
 use std::collections::HashMap;
 use ansi_term::Colour;
-
-#[derive(PartialEq, Display, Debug)]
-pub enum ComputeVendor {
-    NVIDIA,
-    AMD,
-    Intel,
-    Apple,
-    Generic,
-}
-
-impl ComputeVendor {
-    pub fn parse(platform: &str) -> ComputeVendor {
-        match platform {
-            "NVIDIA Corporation" | "NVIDIA" => ComputeVendor::NVIDIA,
-            "Advanced Micro Devices, Inc." | "AuthenticAMD" | "AMD" => ComputeVendor::AMD,
-            "GenuineIntel" | "Intel" | "Intel(R) Corporation" => ComputeVendor::Intel,
-            "Apple" => ComputeVendor::Apple,
-            _ => ComputeVendor::Generic,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ComputeProgramType {
-    Binary,
-    Source,
-    
-}
-#[derive(Debug)]
-pub enum ComputeError {
-    KernelBuilding,
-}
-
-impl std::error::Error for ComputeError {}
-
-impl std::fmt::Display for ComputeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-pub type ComputeResult<T> = ::std::result::Result<T, ComputeError>;
-
+use crate::enums::{ComputeVendor};
 
 pub trait ComputePlatform {
     // Static method signature; `Self` refers to the implementor type.

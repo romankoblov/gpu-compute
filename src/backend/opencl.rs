@@ -9,9 +9,11 @@ use ocl::core::{self, DeviceInfo, DeviceInfoResult, PlatformInfo, ContextInfo,
     ProgramBuildInfo, KernelInfo, KernelArgInfo, KernelWorkGroupInfo,
     EventInfo, ProfilingInfo, Status};
 
-use super::generic::{ComputeVendor, ComputePlatform, ComputeDevice, ComputeQueue, 
-    ComputeProgramBuilder, ComputeProgram, ComputeError, ComputeResult, PtxFunctionInfo};
+use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, 
+    ComputeProgramBuilder, ComputeProgram, PtxFunctionInfo};
 use crate::util;
+use crate::error::{ComputeResult, ComputeError};
+use crate::enums::{ComputeVendor};
 
 // Convert the info or error to a string for printing:
 macro_rules! ocl_to_string {
