@@ -1,9 +1,3 @@
-#[macro_use] extern crate rustacuda;
-extern crate nvrtc;
-extern crate ocl;
-
-extern crate ansi_term;
-#[macro_use] extern crate log;
 use log::*;
 
 pub mod generic;
