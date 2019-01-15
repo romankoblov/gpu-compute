@@ -18,3 +18,9 @@ impl Vendor {
         }
     }
 }
+
+#[derive(PartialEq, Display, Debug)]
+pub enum CompilerOpt {
+    LineInfo,
+    Debug,
+}

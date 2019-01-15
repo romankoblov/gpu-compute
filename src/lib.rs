@@ -3,6 +3,7 @@ use log::*;
 
 pub mod error;
 pub mod enums;
+pub mod grid;
 pub mod backend;
 pub mod program;
 pub mod util;
