@@ -41,7 +41,7 @@ fn main() {
         }
     "#;
     let kernel = r#"
-        #include "/gpu_compute.h"
+        #include "/gpu_compute/platform.h"
         CONSTANT int pyopencl_defeat_cache_10 = 0;
         #include "world.cl"
         KERNEL void say_hi(GLOBAL_MEM unsigned int *a)

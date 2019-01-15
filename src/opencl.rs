@@ -50,47 +50,6 @@ pub fn ocl_debug(pro_que: &ProQue, device: &Device){
     );
 }
 
-// pub fn get_ocl(work_size: usize, src: &str) -> ProQue {
-//     let dev = gpu_select();
-//     // ocl to stupid to select correct platform with device specifier
-//     let platform = match dev.info(DeviceInfo::Platform).unwrap() {
-//         DeviceInfoResult::Platform(i) => i,
-//         res => panic!("get_ocl wrong get_platform: {}", res),
-//     };
-//     let vendor: &str = match dev.vendor().unwrap().as_ref() {
-//         "Advanced Micro Devices, Inc." => "AMD",
-//         "AuthenticAMD" => "AMD",
-//         "GenuineIntel" => "INTEL",
-//         "AMD" => "AMD",
-//         "NVIDIA" => "NVIDIA",
-//         "Intel" => "INTEL",
-//         "Intel(R) Corporation" => "INTEL",
-//         "NVIDIA Corporation" => "NVIDIA",
-//         _ => "GENERIC"
-//     };
-//     info!("OCL DEVICE VENDOR: {}", vendor);
-//     let mut source = String::new();
-//     source.push_str(&format!("#define VENDOR_{} 1\n", vendor));
-//     source.push_str(&src);
-//     let mut prog_bldr = Program::builder();
-//     prog_bldr.source(source);
-//     // if dev.name().unwrap().contains("NVIDIA") {
-//     //     prog_bldr.cmplr_opt("-cl-nv-verbose");
-//     // }
-//     // println!("SRC:\n{}", src);
-//     let pro_que = ProQue::builder()
-//     //.src(src)
-//     .prog_bldr(prog_bldr)
-//     .dims(work_size)
-//     .platform(ocl::Platform::new(platform))
-//     .device(ocl::builders::DeviceSpecifier::Single(dev))
-//     .build().unwrap();
-//     // ocl_debug(&pro_que, &dev);
-
-//     pro_que
-// }
-
-
 pub struct OclPlatform {}
 
 impl ComputePlatform for OclPlatform {
@@ -322,7 +281,9 @@ impl<'a> ComputeProgramBuilder<'a> for OclProgramBuilder<'a> {
         self
     }
     fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.add_header(&include_str!("../headers/opencl.cl"), "/gpu_compute.h");
+        self.add_header(self.vendor_header().as_str(), "/gpu_compute/vendor.h");
+        self.add_header(self.cache_header(self.debug).as_str(), "/gpu_compute/cache.h");
+        self.add_header(&include_str!("../headers/opencl.cl"), "/gpu_compute/platform.h");
         self
     }
     fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
@@ -337,12 +298,8 @@ impl<'a> ComputeProgramBuilder<'a> for OclProgramBuilder<'a> {
     fn build_source(&self) -> Result<Box<dyn ComputeProgram + 'a>, Box<Error>> {
         // Works correctly on macos for non-empty kernels
         // TODO: check for opencl version per device for legacy stuff
-    //    self.build_legacy(src);
+        // self.build_legacy(src);
         self.build_compile()
-        // match self.queue.device.platform_vendor() {
-        //     ComputeVendor::Generic => self.build_legacy(src),
-        //     _ => self.build_compile(src),
-        // };
     }
 }
 

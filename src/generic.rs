@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use ansi_term::Colour;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Display, Debug)]
 pub enum ComputeVendor {
     NVIDIA,
     AMD,
@@ -93,6 +93,20 @@ pub trait ComputeProgramBuilder<'a> {
     fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
     fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
     fn set_source(&mut self, src: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
+
+    fn vendor_header(&self) -> String {
+        let dev = self.queue().device();
+        let vendor = dev.platform_vendor().to_string();
+        format!(r#"
+#define PLATFROM_{} 1
+#define VENDOR_{} 1
+        "#, dev.platform().name().to_uppercase(), vendor.to_uppercase())
+    }
+
+    fn cache_header(&self, debug: bool) -> String {
+        let uuid = if debug { format!("{}", uuid::Uuid::new_v4().to_simple()) } else { "".to_string() };
+        format!("CONSTANT int GPU_COMPUTE_DISABLE_CACHE_{} = 0;", uuid)
+    }
 
     // Debug
     fn build_fail(&self, log: &str, build_type: Option<&str>, file: Option<&str>) -> String {

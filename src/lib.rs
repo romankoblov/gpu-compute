@@ -1,3 +1,4 @@
+#[macro_use] extern crate strum_macros;
 use log::*;
 
 pub mod generic;
@@ -100,7 +101,7 @@ pub fn init(){
         }
     "#;
     let kernel = r#"
-        #include "/gpu_compute.h"
+        #include "/gpu_compute/platform.h"
         CONSTANT int pyopencl_defeat_cache_10 = 0;
         #include "world.cl"
         KERNEL void say_hi(GLOBAL_MEM unsigned int *a)

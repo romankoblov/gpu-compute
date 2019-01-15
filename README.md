@@ -52,9 +52,10 @@ Currently I don't see reasons to have separated Context and Queue structs.
 TODO
 ----
 
-- [ ] get_ptx tool
-- [ ] add /gpu_compute/vendor.h with: VENDOR_XXX, PLATFORM_XXX
-- [ ] defeat cache mechanic
+- [*] get_ptx tool
+- [+] add /gpu_compute/vendor.h with: VENDOR_XXX, PLATFORM_XXX
+- [ ] reduce copy/paster in opencl/cuda program builders
+- [+] defeat cache mechanic
 - [ ] cleanup && add headers
 - [ ] launch kernel
 - [ ] memory management

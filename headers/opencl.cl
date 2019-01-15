@@ -1,3 +1,4 @@
+#include "/gpu_compute/vendor.h"
 // temporary taken from https://github.com/tbenthompson/cluda for testing purposes.
 // taken from pyopencl._cluda
 #define LOCAL_BARRIER barrier(CLK_LOCAL_MEM_FENCE)
@@ -26,3 +27,4 @@
 #elif defined(cl_amd_fp64)
 #pragma OPENCL EXTENSION cl_amd_fp64: enable
 #endif
+#include "/gpu_compute/cache.h"

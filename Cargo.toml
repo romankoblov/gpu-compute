@@ -16,6 +16,9 @@ rustacuda_core = "0.1"
 nvrtc = "0.1.2"
 log = "0.4"
 ansi_term = "0.9"
+strum = "0.13.0"
+strum_macros = "0.13.0"
+uuid = { version = "0.7", features = ["v4"] }
 
 [patch.crates-io]
 ocl = { git = "https://github.com/romankoblov/ocl" }

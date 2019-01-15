@@ -1,3 +1,4 @@
+#include "/gpu_compute/vendor.h"
 // temporary taken from https://github.com/tbenthompson/cluda for testing purposes.
 #define CUDA
 // taken from pycuda._cluda
@@ -52,3 +53,4 @@ WITHIN_KERNEL SIZE_T get_global_id(unsigned int dim)
 {
     return get_local_id(dim) + get_group_id(dim) * get_local_size(dim);
 }
+#include "/gpu_compute/cache.h"
