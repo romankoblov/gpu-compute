@@ -2,7 +2,7 @@
 
 pub struct GridSize {
     // <<<dimGrid, dimBlock>>>
-    // <<<blocks, threads>>>
+    // <<<blocks, threads>>> -> blocks per grid; threads per block
     x: (usize, usize),
     y: Option<(usize, usize)>,
     z: Option<(usize, usize)>,

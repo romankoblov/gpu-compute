@@ -19,6 +19,12 @@ ansi_term = "0.9"
 strum = "0.13.0"
 strum_macros = "0.13.0"
 uuid = { version = "0.7", features = ["v4"] }
+shader-prepper = "0.2.0"
+failure = "0.1.5"
+regex = "1"
+lazy_static = "1.2.0"
 
 [patch.crates-io]
 ocl = { git = "https://github.com/romankoblov/ocl" }
+# ocl = { path = "../ocl/ocl" }
+# ocl-core = { path = "../ocl/ocl-core" }

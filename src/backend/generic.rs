@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use ansi_term::Colour;
-use crate::enums::{Vendor};
+use crate::enums::{Vendor, CompilerOpt, PtxInfo};
+use crate::program::SourceProgramBuilder;
 
 pub trait ComputePlatform {
     // Static method signature; `Self` refers to the implementor type.
@@ -8,6 +9,7 @@ pub trait ComputePlatform {
     fn init(&self) -> Result<(), Box<dyn std::error::Error>> where Self: std::marker::Sized;
     fn name(&self) -> &str;
     fn short_name(&self) -> &str;
+    fn stub_header(&self) -> &'static str;
     fn list_devices<'a>(&'a self) -> Vec<Box<dyn ComputeDevice + 'a>>;
     fn default_device<'a>(&'a self) -> Option<Box<dyn ComputeDevice + 'a>> {
         let mut dev = self.list_devices();
@@ -29,9 +31,16 @@ pub trait ComputeDevice {
     fn priority(&self) -> usize { 0 }
     fn vendor(&self) -> Vendor;
     fn platform_vendor(&self) -> Vendor;
+    fn version_tuple(&self) -> (usize, usize);
+    fn version(&self) -> usize {
+        let (major, minor) = self.version_tuple();
+        major*100+minor*10
+    }
     fn details(&self) -> String;
     fn platform(&self) -> &dyn ComputePlatform;
+    fn default_queue<'a>(&'a self) -> &'a (dyn ComputeQueue + 'a);
     fn queue<'a>(&'a self) -> Box<dyn ComputeQueue + 'a>;
+    fn compiler_opts(&self, opts: &[CompilerOpt]) -> Vec<String>;
 }
 
 impl<'a> std::fmt::Debug for ComputeDevice + 'a {
@@ -42,7 +51,9 @@ impl<'a> std::fmt::Debug for ComputeDevice + 'a {
 
 pub trait ComputeQueue {
     fn device(&self) -> &dyn ComputeDevice;
-    fn program_builder<'a>(&'a self) -> Box<dyn ComputeProgramBuilder + 'a>;
+    fn build_source(&self, builder: &SourceProgramBuilder);
+    fn get_ptx_info(&self, builder: &SourceProgramBuilder) -> Option<PtxInfo>;
+
     fn flush(&self);
 }
 
@@ -54,93 +65,8 @@ impl<'a> std::fmt::Debug for ComputeQueue + 'a {
     }
 }
 
-pub trait ComputeProgramBuilder<'a> {
-    fn queue(&self) -> &dyn ComputeQueue;
-    // Builder
-    fn compiler_opt(&mut self, opt: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
-    fn debug(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
-    fn add_header(&mut self, src: &str, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
-    fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
-    fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
-    fn set_source(&mut self, src: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a);
-
-    fn vendor_header(&self) -> String {
-        let dev = self.queue().device();
-        let vendor = dev.platform_vendor().to_string();
-        format!(r#"
-#define PLATFROM_{} 1
-#define VENDOR_{} 1
-        "#, dev.platform().name().to_uppercase(), vendor.to_uppercase())
-    }
-
-    fn cache_header(&self, debug: bool) -> String {
-        let uuid = if debug { format!("{}", uuid::Uuid::new_v4().to_simple()) } else { "".to_string() };
-        format!("CONSTANT int GPU_COMPUTE_DISABLE_CACHE_{} = 0;", uuid)
-    }
-
-    // Debug
-    fn build_fail(&self, log: &str, build_type: Option<&str>, file: Option<&str>) -> String {
-        let b_failed = Colour::Red.paint("BUILD FAILED!");
-        let small_h = Colour::Yellow.paint("################################");
-        let big_h = Colour::Yellow.paint("###############################################################################");
-        let file_h = match file {
-            Some(file) => format!(" File: {}", Colour::Yellow.paint(file)),
-            None => "".to_string(),
-        };
-        let type_h = match build_type {
-            Some(file) => format!(" Type: {}", Colour::Yellow.paint(file)),
-            None => "".to_string(),
-        };
-        let info = format!("{} Platform: {}{}{}", 
-            Colour::Yellow.paint("#"),
-            Colour::Yellow.paint(self.queue().device().platform().name()),
-            type_h, file_h);
-        format!("{} {} {}\n{}\n{}\n{}\n{}\n", small_h, b_failed, small_h, info, big_h, log, big_h)
-    }
-    // Final
-    fn build_source(&self) -> Result<Box<dyn ComputeProgram + 'a>, Box<std::error::Error>>;
-}
-
-// NVIDIA specific struct of kernel sizes
-pub struct PtxFunctionInfo {
-    pub registers: Option<usize>,
-    pub mem_local: Option<usize>,
-    pub mem_shared: Option<usize>,
-    pub mem_const: Option<usize>,
-    // MaxThreadsPerBlock
-    pub max_threads: Option<usize>,
-}
-
-impl std::fmt::Display for PtxFunctionInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut s = String::new();
-        if let Some(registers) = self.registers {
-            s.push_str("R: ");
-            s.push_str(registers.to_string().as_str())
-        }
-        if let Some(mem_local) = self.mem_local {
-            s.push_str(" L: ");
-            s.push_str(mem_local.to_string().as_str())
-        }
-        if let Some(mem_shared) = self.mem_shared {
-            s.push_str(" S: ");
-            s.push_str(mem_shared.to_string().as_str())
-        }
-        if let Some(mem_const) = self.mem_const {
-            s.push_str(" C: ");
-            s.push_str(mem_const.to_string().as_str())
-        }
-        if let Some(max_threads) = self.max_threads {
-            s.push_str(" T: ");
-            s.push_str(max_threads.to_string().as_str())
-        }
-        write!(f, "{}", s)
-    }
-}
-
 pub trait ComputeProgram {
     fn get_ptx(&self) -> Option<String>;
-    fn get_ptx_info(&self) -> Option<HashMap<String, PtxFunctionInfo>>;
 //    fn queue(&self) -> &dyn ComputeQueue;
 }
 

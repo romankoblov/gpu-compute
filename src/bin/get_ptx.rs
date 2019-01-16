@@ -34,6 +34,10 @@ fn main() {
             unsigned int gid = 99;
             #endif
             a[gid] = 6;
+            LOCAL_MEM unsigned int zzz[100];
+            for (int i=0; i<100; i++)
+                zzz[i] = gid*2;
+            printf("ZZZ: %d \n", zzz[5]);
         }
         WITHIN_KERNEL void hi(unsigned int gid)
         { 
@@ -69,20 +73,21 @@ fn main() {
     for (idx, d) in cp.list_devices(){
         if d.vendor() != gpu_compute::enums::Vendor::NVIDIA { continue; }
         let q = d.queue();
-        let program = q.program_builder()
+        let mut p = gpu_compute::program::SourceProgramBuilder::new(Some("hello_world.c"))
             .debug()
-            .add_stub_header()
+            .compiler_opt(gpu_compute::enums::CompilerOpt::NV_PTAX)
             .add_header(header, "world.cl")
             .add_fn("say_hi")
             .add_fn("say_hi2")
-            .set_source(&kernel)
-            .build_source().unwrap();
+            .set_source(&kernel);
 
-        println!("OMG: {:?}", program.get_ptx());
-        if let Some(info) = program.get_ptx_info() {
-            for (k, v) in info {
-                println!("PTX_INFO: {} ==\t{}", k, v);
-            }
+        if let Some(ptx_info) =  q.get_ptx_info(&p) {
+            println!("OMG: {} {} {} {}", d.name(), d.version(), d.platform().name(), ptx_info.ptx.len());
         }
+        // if let Some(info) = program.get_ptx_info() {
+        //     for (k, v) in info {
+        //         println!("PTX_INFO: {} ==\t{}", k, v);
+        //     }
+        // }
     }
 }

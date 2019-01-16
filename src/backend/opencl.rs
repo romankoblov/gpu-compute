@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::CString;
 use std::error::Error;
 use std::collections::HashMap;
+use std::os::raw;
 
 use ocl::{self, ProQue, Platform, Device, Program, Event, EventList};
 use ocl::core::{self, DeviceInfo, DeviceInfoResult, PlatformInfo, ContextInfo,
@@ -9,11 +10,11 @@ use ocl::core::{self, DeviceInfo, DeviceInfoResult, PlatformInfo, ContextInfo,
     ProgramBuildInfo, KernelInfo, KernelArgInfo, KernelWorkGroupInfo,
     EventInfo, ProfilingInfo, Status};
 
-use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, 
-    ComputeProgramBuilder, ComputeProgram, PtxFunctionInfo};
+use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, ComputeProgram};
 use crate::util;
 use crate::error::{ComputeResult, ComputeError};
-use crate::enums::{Vendor};
+use crate::enums::{Vendor, CompilerOpt, PtxFunctionInfo, PtxInfo};
+use crate::program::SourceProgramBuilder;
 
 // Convert the info or error to a string for printing:
 macro_rules! ocl_to_string {
@@ -62,7 +63,7 @@ impl ComputePlatform for OclPlatform {
 
     fn name(&self) -> &str { "OpenCL" }
     fn short_name(&self) -> &str { "cl" }
-
+    fn stub_header(&self) -> &'static str { include_str!("../../headers/opencl.cl") }
     fn list_devices<'a>(&'a self) -> Vec<Box<dyn ComputeDevice + 'a>> {
         let mut out: Vec<Box<(dyn ComputeDevice)>> = vec![];
         for platform in Platform::list() {
@@ -77,13 +78,22 @@ impl ComputePlatform for OclPlatform {
 
 pub struct OclDevice<'a> {
     pub platform: &'a OclPlatform,
+    pub default_queue: OclQueue<'a>,
     ocl_platform: ocl::Platform,
     ocl_device: ocl::Device,
 }
 
 impl<'a> OclDevice<'a> {
     fn new(platform: &'a OclPlatform, ocl_platform: ocl::Platform, ocl_device: ocl::Device) -> OclDevice<'a> {
-        OclDevice { platform, ocl_platform, ocl_device }
+        let queue = OclQueue::new_default(ocl_platform, ocl_device);
+        let device = OclDevice { platform, default_queue: queue, ocl_platform, ocl_device };
+        device
+    }
+    fn get_wg_size(&self, kernel: &core::Kernel) -> usize {
+       match core::get_kernel_work_group_info(&kernel, self.ocl_device, core::KernelWorkGroupInfo::WorkGroupSize).unwrap() {
+            core::KernelWorkGroupInfoResult::WorkGroupSize(wg) => wg,
+            other => panic!("OpenCL get_wg_size do incorrect output: {:?}", other),
+        }
     }
 }
 
@@ -110,37 +120,46 @@ impl<'a> ComputeDevice for OclDevice<'a> {
     fn platform_vendor(&self) -> Vendor {
         Vendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
     }
-
+    
+    fn version_tuple(&self) -> (usize, usize) {
+        let ocl_version = match core::get_device_info(self.ocl_device, core::DeviceInfo::Version).unwrap()
+        {
+            core::DeviceInfoResult::Version(ver) => ver.to_raw(),
+            other => panic!("OpenCL version_tuple incorrect result: {}", other),
+        };
+        (ocl_version.0 as usize, ocl_version.1 as usize)
+    }
 
     fn vendor(&self) -> Vendor {
         Vendor::parse(self.ocl_platform.vendor().unwrap().as_ref())
     }
 
     fn details(&self) -> String {
-        // let global_mem = match self.device.info(ocl::enums::DeviceInfo::GlobalMemSize).unwrap() {
-        //     ocl::enums::DeviceInfoResult::GlobalMemSize(val) => val,
-        //     _ => 0,
-        // };
-        // let global_mem_alloc = match self.device.info(ocl::enums::DeviceInfo::MaxMemAllocSize).unwrap() {
-        //     ocl::enums::DeviceInfoResult::MaxMemAllocSize(val) => val,
-        //     _ => 0,
-        // };
-        // format!("CU: {} MEM: {} ALLOC: {}", 
-        //     self.device.info(ocl::enums::DeviceInfo::MaxComputeUnits).unwrap(),
-        //     junkyard::scale_bytes(global_mem),
-        //     junkyard::scale_bytes(global_mem_alloc),
-        // )
         //  Preferred work group size multiple              32
         //  Max work group size                             1024
         format!("Not implemented")
     }
+    fn default_queue<'b>(&'b self) -> &dyn ComputeQueue {
+        &self.default_queue
+    }
     fn queue<'b>(&'b self) -> Box<dyn ComputeQueue + 'b> {
         Box::new(OclQueue::new(&self))
+    }
+    fn compiler_opts(&self, opts: &[CompilerOpt]) -> Vec<String> {
+        let mut opt_vec  = Vec::with_capacity(opts.len());
+        for opt in opts {
+            match opt {
+                CompilerOpt::NV_PTAX => opt_vec.push("-cl-nv-verbose".to_string()),
+//                CompilerOpt::AMD_TEMPS => opt_vec.push("-fbin-amdil".to_string()),
+                _ => {},
+            }
+        }
+        opt_vec
     }
 }
 
 pub struct OclQueue<'a> {
-    pub device: &'a OclDevice<'a>,
+    pub device: Option<&'a OclDevice<'a>>,
     ocl_ctx: ocl::Context,
     ocl_queue: ocl::Queue,
 }
@@ -153,155 +172,118 @@ impl <'a> OclQueue<'a> {
             .build()
             .unwrap();
         let ocl_queue = ocl::Queue::new(&ocl_ctx, device.ocl_device, None).unwrap();
-        OclQueue { device, ocl_ctx, ocl_queue }
+        OclQueue { device: Some(device), ocl_ctx, ocl_queue }
+    }
+    fn new_default(ocl_platform: ocl::Platform, ocl_device: ocl::Device) -> OclQueue<'a> {
+        let ocl_ctx = ocl::Context::builder()
+            .platform(ocl_platform)
+            .devices(ocl_device)
+            .build()
+            .unwrap();
+        let ocl_queue = ocl::Queue::new(&ocl_ctx, ocl_device, None).unwrap();
+        OclQueue { device: None, ocl_ctx, ocl_queue }
+    }
+    fn get_build_log(&self, program: &core::Program) -> String {
+        let device = self.device.unwrap().ocl_device;
+        match core::get_program_build_info(program, *device.as_core(), core::ProgramBuildInfo::BuildLog) {
+            Ok(core::ProgramBuildInfoResult::BuildLog(log)) => { return log; },
+            e => panic!("Cannot get build log (opencl): {:?}!", e),
+        }
+    }
+    fn build_wrap<T>(&self, builder: &SourceProgramBuilder, program: &core::Program, res: core::Result<T>) -> ComputeResult<T> {
+        match res {
+            Ok(r) => { return Ok(r); },
+            Err(e) => {
+                println!("{}", builder.fmt_build_fail_log(self.device(), &self.get_build_log(program)  ));
+                return Err(ComputeError::KernelBuilding);
+            }
+        }
+    }
+    fn build_legacy(&self, builder: &SourceProgramBuilder)  -> Result<core::Program, Box<Error>> {
+        let device = &self.device.unwrap().ocl_device;
+        let ctx = &self.ocl_ctx;
+        
+        let compiler_opts = CString::new(self.device().compiler_opts(&builder.compiler_options).join(" ")).unwrap();
+        let source = builder.legacy_source(self.device());
+
+        let program = core::create_build_program(
+            ctx, 
+            &[CString::new(source).unwrap()], 
+            Some(&[device]), 
+            &CString::new(compiler_opts).unwrap()
+        ).unwrap();
+        Ok(program)
+    }
+    fn build_compile(&self, builder: &SourceProgramBuilder) -> Result<core::Program, Box<Error>> {
+        let device = &self.device.unwrap().ocl_device;
+        let ctx = &self.ocl_ctx;
+
+        let compiler_opts = CString::new(self.device().compiler_opts(&builder.compiler_options).join(" ")).unwrap();
+        let source = builder.get_source();
+        let (headers, names) = builder.generate_headers(self.device());
+
+        let headers_programs = crate::cstring_vec!(headers).into_iter().map(|p| core::create_program_with_source(ctx, &[p]) ).collect::<Result<Vec<_>, _>>().unwrap();
+        let headers_names = crate::cstring_vec!(names);
+
+        let program = core::create_program_with_source(ctx, &[CString::new(source).unwrap()]).unwrap();
+
+        self.build_wrap::<()>(&builder, &program, core::compile_program(&program,
+            Some(&[device.as_core()]), 
+            &compiler_opts, 
+            &headers_programs.iter().map(|p| p).collect::<Vec<&core::Program>>(), 
+            &headers_names, 
+            None, None, None)).unwrap();
+
+        let linked = core::link_program(ctx, Some(&[device]), &CString::new("").unwrap(), &[&program], 
+            None, None, None).unwrap();
+
+        Ok(linked)
+    }
+    fn get_ptx(&self, program: &core::Program) -> String {
+        let bin = match core::get_program_info(&program, core::ProgramInfo::Binaries).unwrap() {
+            core::ProgramInfoResult::Binaries(bin) => bin,
+            other => panic!("OpenCL get_program_info unexpected result: {:?}", other),
+        };
+        if bin.len() != 1 { panic!("OpenCL get_ptx vector length more than 1: {} {:?}", bin.len(), bin); }
+        String::from_utf8(bin[0].clone()).unwrap()
     }
 }
 
 impl<'a> ComputeQueue for OclQueue<'a> {
-    fn device(&self) -> &dyn ComputeDevice { self.device }
-    fn program_builder<'b>(&'b self) -> Box<dyn ComputeProgramBuilder + 'b> {
-        Box::new(OclProgramBuilder::new(&self))
-    }
+    fn device(&self) -> &dyn ComputeDevice { self.device.unwrap() }
     fn flush(&self) {
         let _t: Event = self.ocl_queue.enqueue_marker::<EventList>(None).unwrap();
         self.ocl_queue.flush().unwrap();
         self.ocl_queue.finish().unwrap();
     }
-}
-
-pub struct OclProgramBuilder<'a> {
-    pub queue: &'a OclQueue<'a>,
-    debug: bool,
-    headers: Vec<String>,
-    headers_names: Vec<String>,
-    compiler_options: Vec<String>,
-    functions: Vec<String>,
-    source: Option<String>,
-}
-
-impl <'a> OclProgramBuilder<'a> {
-    fn new(queue: &'a OclQueue) -> OclProgramBuilder<'a> {
-        let headers = Vec::new();
-        let headers_names = Vec::new();
-        let compiler_options = Vec::new();
-        let functions = Vec::new();
-        OclProgramBuilder { queue, debug: false, headers, headers_names, compiler_options, functions, source: None }
-    }
-
-    fn get_compiler_opt(&self) -> String {
-        self.compiler_options.join(" ")
-    }
-
-    fn get_build_log(&self, program: &core::Program) -> String {
-        let device = self.queue.device.ocl_device;
-        match core::get_program_build_info(program, *device.as_core(), core::ProgramBuildInfo::BuildLog) {
-            Ok(core::ProgramBuildInfoResult::BuildLog(log)) => { return log; },
-            e => panic!("Cannot get build log (opencl): {:?}!", e),
-        }
-
-    }
-
-    fn build_wrap<T>(&self, program: &core::Program, build_type: &str, res: core::Result<T>) -> ComputeResult<T> {
-        match res {
-            Ok(r) => { return Ok(r); },
-            Err(e) => {
-                println!("{}", self.build_fail(&self.get_build_log(program), Some(build_type), None));
-                return Err(ComputeError::KernelBuilding);
-            }
-        }
-    }
-
-    fn build_legacy(&self)  -> Result<(), Box<Error>> {
-        let src = match &self.source {
-            Some(s) => s,
-            None => panic!("Trying to build program without source."),
+    fn build_source(&self, builder: &SourceProgramBuilder) {
+        let program = if self.device().version() >= 120 {
+            self.build_legacy(builder).unwrap()
+        } else {
+            self.build_compile(builder).unwrap()
         };
-        let device = &self.queue.device.ocl_device;
-        let ctx = &self.queue.ocl_ctx;
+    }
+    fn get_ptx_info(&self, builder: &SourceProgramBuilder) -> Option<PtxInfo> {
+        // if not NVIDIA: return None
+        if self.device().vendor() != Vendor::NVIDIA { return None; }
+        let legacy = self.build_legacy(builder).unwrap();
+        let ptx = self.get_ptx(&legacy);
+        let mut info = PtxInfo::new(&ptx);
+        let mut fn_info = PtxFunctionInfo::parse_ptxas(&self.get_build_log(&legacy));
 
-        let mut strings = vec![];
-        for i in 0..self.headers.len() {
-            strings.push(util::legacy_process(&self.headers[i], &self.headers_names[i]));
+        for fn_name in &builder.get_functions() {
+            let kernel = core::create_kernel(&legacy, fn_name).unwrap();
+            let wg_size = self.device.unwrap().get_wg_size(&kernel);
+            let fn_info: &mut PtxFunctionInfo = fn_info.get_mut(fn_name).unwrap();
+            fn_info.max_threads = Some(wg_size);
+            info.add_fn(fn_name, fn_info.clone());
         }
-        strings.push(util::legacy_process(src, "KERNEL"));
-        let cstrings = strings.iter().map(|h| CString::new(h.as_str())).collect::<Result<Vec<_>, _>>()?;
-
-        let program = core::create_build_program(ctx, &cstrings[..], Some(&[device]), &CString::new(self.get_compiler_opt()).unwrap()).unwrap();
-        println!("LEGACY: {:?}", self.get_build_log(&program));
-
-        Ok(())
-    }
-
-    // Supported by OpenCL 1.2 only, fails on MacOS
-    fn build_compile(&self) -> Result<Box<dyn ComputeProgram + 'a>, Box<Error>> {
-        let src = match &self.source {
-            Some(s) => s.as_str(),
-            None => panic!("Trying to build program without source."),
-        };
-        let device = &self.queue.device.ocl_device;
-        let ctx = &self.queue.ocl_ctx;
-
-        // Compile headers
-        let headers_cstr = self.headers.iter().map(|h| CString::new(h.as_str()) ).collect::<Result<Vec<_>, _>>()?;
-        // uses some strange crate 'failure' for error reporting, which doesn't implement std::Error
-        let headers_programs = headers_cstr.into_iter().map(|p| core::create_program_with_source(ctx, &[p]) ).collect::<Result<Vec<_>, _>>().unwrap();
-        let h_programs_ptr: Vec<&core::Program> = headers_programs.iter().map(|p| p).collect();
-        let headers_names = self.headers_names.iter().map(|h| CString::new(h.as_str()) ).collect::<Result<Vec<_>, _>>()?;
-        let c_src = CString::new(src)?;
-        let program = core::create_program_with_source(ctx, &[c_src]).unwrap();
-
-        self.build_wrap::<()>(&program, "Compile", core::compile_program(&program,
-            Some(&[device.as_core()]), 
-            &CString::new(self.get_compiler_opt()).unwrap(), 
-            &h_programs_ptr[..], 
-            &headers_names, 
-            None, None, None)).unwrap();
-        // TODO: expose link options?                         // -cl-nv-verbose -- doesn't work
-        let linked = core::link_program(ctx, Some(&[device]), &CString::new("").unwrap(), &[&program], 
-            None, None, None).unwrap();
-        println!("PROGRAM: {:?}", self.get_build_log(&program));
-        Ok(Box::new(OclProgram::new(self.queue, ocl::Program::from(linked))))
-    }
-}
-
-impl<'a> ComputeProgramBuilder<'a> for OclProgramBuilder<'a> {
-    fn queue(&self) -> &dyn ComputeQueue { self.queue }
-    fn compiler_opt(&mut self, opt: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.compiler_options.push(opt.to_string());
-        self
-    }
-    fn debug(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.debug = true;
-        if self.queue.device.vendor() == Vendor::NVIDIA {
-            self.compiler_opt("-cl-nv-verbose");
+        if self.device().version() >= 120 {
+            let compiler = self.build_compile(builder).unwrap();
+            info.add_ptx("compiler", &self.get_ptx(&compiler));
         }
-        self
-    }
-    fn add_header(&mut self, src: &str, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.headers.push(String::from(src));
-        self.headers_names.push(String::from(name));
-        self
-    }
-    fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.add_header(self.vendor_header().as_str(), "/gpu_compute/vendor.h");
-        self.add_header(self.cache_header(self.debug).as_str(), "/gpu_compute/cache.h");
-        self.add_header(&include_str!("../../headers/opencl.cl"), "/gpu_compute/platform.h");
-        self
-    }
-    fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.functions.push(name.to_string());
-        self
-    }
-    fn set_source(&mut self, src: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        if self.source.is_some() { panic!("Source already set for kernel."); }
-        self.source = Some(src.to_string());
-        self
-    }
-    fn build_source(&self) -> Result<Box<dyn ComputeProgram + 'a>, Box<Error>> {
-        // Works correctly on macos for non-empty kernels
-        // TODO: check for opencl version per device for legacy stuff
-        // self.build_legacy(src);
-        self.build_compile()
+
+        Some(info)
     }
 }
 
@@ -320,7 +302,5 @@ impl<'a> ComputeProgram for OclProgram<'a> {
     fn get_ptx(&self) -> Option<String> {
         None
     }
-    fn get_ptx_info(&self) -> Option<HashMap<String, PtxFunctionInfo>> {
-        None
-    }
+
 }

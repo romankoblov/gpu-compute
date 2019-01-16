@@ -59,6 +59,7 @@ Platform
 - Device . get_version -> major, minor:
   - CUDA: returns compute capability
   - OpenCL: returns supported OpenCL version
+- Stub header always added to header list, its up to user include it or not.
 
 API
 ---
@@ -96,7 +97,6 @@ let program = gpu_compute::SourceProgramBuilder()
    .debug() // Enable debug (lineinfo for cuda, -cl-nv-verbose for opencl?)
    .compiler_opt(gpu_compute::CompileOpts::LineInfo)
    .compiler_opt(gpu_compute::CompileOpts::Debug)
-   .add_stub_header() // add platform specific headers from ../headers
    .add_header(header, "world.cl") // add header from &str with name
    .set_source(&kernel) // Set main source from &str
    .add_fn("say_hi", say_hi)
@@ -125,14 +125,23 @@ TODO
 
 - [*] get_ptx tool
 - [+] add /gpu_compute/vendor.h with: VENDOR_XXX, PLATFORM_XXX
-- [ ] reduce copy/paster in opencl/cuda program builders
+- [+] reduce copy/paste in opencl/cuda program builders
 - [+] defeat cache mechanic
 - [ ] cleanup && add headers
+- [ ] check if GridSize more than device max_GridSize
 - [ ] launch kernel
 - [ ] memory management
 - [ ] gc_test tool
 - [ ] add pipeline support
 - [ ] dynamic loading of backends
+- [ ] pinned memory for OpenCL @ NVIDIA
 - [ ] vulkan shaders
 - [ ] ??? metal shaders ???
 - [ ] ??? opengl shaders ???
+
+Versions
+--------
+
+OpenCL 1.2 -> __OPENCL_VERSION__ == 120
+CUDA 3.5   -> __CUDA_ARCH__ == 350
+DEVICE_VER: major*100+minor*10

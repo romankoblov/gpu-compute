@@ -8,10 +8,10 @@ use rustacuda::device::{Device, DeviceAttribute};
 use rustacuda::function::{Function, FunctionAttribute};
 use nvrtc;
 
-use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, 
-    ComputeProgramBuilder, ComputeProgram, PtxFunctionInfo};
+use super::generic::{ComputePlatform, ComputeDevice, ComputeQueue, ComputeProgram};
 use crate::error::{ComputeError, ComputeResult};
-use crate::enums::{Vendor};
+use crate::enums::{Vendor, CompilerOpt, PtxInfo, PtxFunctionInfo};
+use crate::program::SourceProgramBuilder;
 
 pub struct CudaPlatform {}
 
@@ -24,6 +24,7 @@ impl ComputePlatform for CudaPlatform {
 
     fn name(&self) -> &str { "CUDA" }
     fn short_name(&self) -> &str { "cu" }
+    fn stub_header(&self) -> &'static str { include_str!("../../headers/cuda.cu") }
 
     fn list_devices<'a>(&'a self) -> Vec<Box<dyn ComputeDevice + 'a>> {
         let mut out: Vec<Box<(dyn ComputeDevice)>> = vec![];
@@ -36,6 +37,8 @@ impl ComputePlatform for CudaPlatform {
 
 pub struct CudaDevice<'a> {
     pub platform: &'a CudaPlatform,
+    pub default_queue: CudaQueue<'a>,
+
     cuda_device: Device,
 }
 
@@ -62,14 +65,13 @@ impl<'a> CudaDevice<'a> {
         // println!("MaxGridDimY: {}", cuda_device.get_attribute(DeviceAttribute::MaxGridDimY).unwrap());
         // println!("MaxGridDimZ: {}", cuda_device.get_attribute(DeviceAttribute::MaxGridDimZ).unwrap());
         // println!("================");
-
-        CudaDevice { platform, cuda_device }
+        let queue = CudaQueue::new_default(cuda_device);
+        let device = CudaDevice { platform, default_queue: queue, cuda_device };
+        device
     }
     fn get_arch(&self) -> String {
-        format!("compute_{}{}", 
-            self.cuda_device.get_attribute(DeviceAttribute::ComputeCapabilityMajor).unwrap(),
-            self.cuda_device.get_attribute(DeviceAttribute::ComputeCapabilityMinor).unwrap()
-        )
+        let (major, minor) = self.version_tuple();
+        format!("compute_{}{}", major, minor)
     }
 }
 
@@ -78,15 +80,69 @@ impl<'a> ComputeDevice for CudaDevice<'a> {
     fn vendor(&self) -> Vendor { Vendor::NVIDIA }
     fn platform_vendor(&self) -> Vendor { Vendor::NVIDIA }
     fn platform(&self) -> &dyn ComputePlatform { self.platform }
+    fn version_tuple(&self) -> (usize, usize) {
+        (self.cuda_device.get_attribute(DeviceAttribute::ComputeCapabilityMajor).unwrap() as usize, 
+        self.cuda_device.get_attribute(DeviceAttribute::ComputeCapabilityMinor).unwrap() as usize)
+    }
     fn details(&self) -> String { format!("Not implemented") }
+    fn default_queue<'b>(&'b self) -> &dyn ComputeQueue {
+        &self.default_queue
+    }
     fn queue<'b>(&'b self) -> Box<dyn ComputeQueue + 'b> {
         Box::new(CudaQueue::new(&self))
     }
+    fn compiler_opts(&self, opts: &[CompilerOpt]) -> Vec<String> {
+        let mut opt_vec  = Vec::with_capacity(opts.len());
+        for opt in opts {
+            match opt {
+                CompilerOpt::LineInfo => opt_vec.push("-lineinfo".to_string()),
+                CompilerOpt::Debug => opt_vec.push("-debug".to_string()),
+                _ => {},
+            }
+        }
+        opt_vec
+    }
 }
 
+struct CudaModule {
+    module: Module,
+    functions: HashMap<String, String>,
+}
+
+impl CudaModule {
+    fn new(ptx: &str, map: HashMap<String, String>) -> CudaModule {
+        let module = Module::load_from_string(&CString::new(ptx).unwrap()).unwrap();
+        CudaModule { module, functions: map.clone() }
+    }
+    pub fn get_fn(&self, name: &str) -> Function {
+        let f = self.module.get_function(&CString::new(name).unwrap());
+        let fn_res = match f {
+            Ok(f) => Ok(f),
+            Err(e) => {
+                // Try to get mangled function
+                if let Some(mangled) = &self.functions.get(name) {
+                    let c_name = CString::new(mangled.as_str()).unwrap();
+                    self.module.get_function(&c_name)
+                } else {
+                    Err(e)
+                }
+            },
+        };
+        fn_res.unwrap()
+    }
+    fn get_ptx_info(&self, name: &str) -> PtxFunctionInfo {
+        let f = self.get_fn(name);
+        let registers = Some(f.get_attribute(FunctionAttribute::NumRegisters).unwrap() as usize);
+        let mem_local = Some(f.get_attribute(FunctionAttribute::LocalSizeBytes).unwrap() as usize);
+        let mem_shared = Some(f.get_attribute(FunctionAttribute::SharedMemorySizeBytes).unwrap() as usize);
+        let mem_const = Some(f.get_attribute(FunctionAttribute::ConstSizeBytes).unwrap() as usize);
+        let max_threads = Some(f.get_attribute(FunctionAttribute::MaxThreadsPerBlock).unwrap() as usize);
+        PtxFunctionInfo { registers, mem_local, mem_shared, mem_const, max_threads }
+    }
+}
 
 pub struct CudaQueue<'a> {
-    pub device: &'a CudaDevice<'a>,
+    pub device: Option<&'a CudaDevice<'a>>,
     // ctx should be after stream or it will crash with "Failed to destroy CUDA stream.: InvalidContext"
     cuda_stream: Stream,
     cuda_ctx: Context,
@@ -96,39 +152,13 @@ impl <'a> CudaQueue<'a> {
     fn new(device: &'a CudaDevice) -> CudaQueue<'a> {
         let cuda_ctx = Context::create_and_push(ContextFlags::MAP_HOST | ContextFlags::SCHED_AUTO, device.cuda_device).unwrap();
         let cuda_stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
-        CudaQueue { device, cuda_stream, cuda_ctx }
+        CudaQueue { device: Some(device), cuda_stream, cuda_ctx }
     }
-}
-
-impl<'a> ComputeQueue for CudaQueue<'a> {
-    fn device(&self) -> &dyn ComputeDevice { self.device }
-    fn program_builder<'b>(&'b self) -> Box<dyn ComputeProgramBuilder + 'b> {
-        Box::new(CudaProgramBuilder::new(&self))
+    fn new_default(device: Device) -> CudaQueue<'a> {
+        let cuda_ctx = Context::create_and_push(ContextFlags::MAP_HOST | ContextFlags::SCHED_AUTO, device).unwrap();
+        let cuda_stream = Stream::new(StreamFlags::NON_BLOCKING, None).unwrap();
+        CudaQueue { device: None, cuda_stream, cuda_ctx }
     }
-    fn flush(&self) {
-        self.cuda_stream.synchronize().unwrap();
-    }
-}
-
-pub struct CudaProgramBuilder<'a> {
-    pub queue: &'a CudaQueue<'a>,
-    debug: bool,
-    headers: Vec<String>,
-    headers_names: Vec<String>,
-    compiler_options: Vec<String>,
-    functions: Vec<String>,
-    source: Option<String>,
-}
-
-impl <'a> CudaProgramBuilder<'a> {
-    fn new(queue: &'a CudaQueue) -> CudaProgramBuilder<'a> {
-        let headers = Vec::new();
-        let headers_names = Vec::new();
-        let compiler_options = Vec::new();
-        let functions = Vec::new();
-        CudaProgramBuilder { queue, debug: false, headers, headers_names, compiler_options, functions, source: None }
-    }
-
     fn get_build_log(&self, program: &nvrtc::NvrtcProgram) -> String {
         match program.get_log() {
             Ok(log) => { return log; },
@@ -136,84 +166,86 @@ impl <'a> CudaProgramBuilder<'a> {
         }
     }
 
-    fn build_wrap<T>(&self, program: &nvrtc::NvrtcProgram, res: Result<T, nvrtc::error::NvrtcError>) -> ComputeResult<T> {
+    fn build_wrap<T>(&self, builder: &SourceProgramBuilder, program: &nvrtc::NvrtcProgram, res: Result<T, nvrtc::error::NvrtcError>) -> ComputeResult<T> {
         match res {
             Ok(r) => { return Ok(r); },
             Err(e) => {
-                println!("{}", self.build_fail(&self.get_build_log(program), Some("Compiling"), None));
+                println!("{}", builder.fmt_build_fail_log(self.device(), &self.get_build_log(program)));
                 return Err(ComputeError::KernelBuilding);
             }
         }
     }
-    // Returns (PTX, Vec<kernels>)
-    fn build_ptx(&self) -> Result<(String, HashMap<String, String>), Box<Error>> {
-        let src = match &self.source {
-            Some(s) => s,
-            None => panic!("Trying to build program without source."),
+
+    fn build_ptx(&self, builder: &SourceProgramBuilder) -> (HashMap<String, String>, String) {
+        let compiler_opts = self.device().compiler_opts(&builder.compiler_options);
+        let (headers, names) = builder.generate_headers(self.device());
+
+        let name = match &builder.name {
+            Some(n) => Some(n.as_str()),
+            None => None,
         };
-        let headers: Vec<_> = self.headers.iter().map(|s| s.as_str()).collect();
-        let headers_names: Vec<_> = self.headers_names.iter().map(|s| s.as_str()).collect();
-        let headers_names: Vec<_> = self.headers_names.iter().map(|s| s.as_str()).collect();
-        let compiler_opts: Vec<_> = self.compiler_options.iter().map(|s| s.as_str()).collect();
-        let program_ptx = nvrtc::NvrtcProgram::new(src, None, &headers, &headers_names)?;
-        for fn_name in &self.functions {
-            program_ptx.add_expr(fn_name)?;
+
+        let program_ptx = nvrtc::NvrtcProgram::new(
+            builder.get_source(),
+            name,
+            &crate::str_vec!(headers),
+            &crate::str_vec!(names),
+        ).unwrap();
+        
+        for fn_name in &builder.get_functions() {
+            program_ptx.add_expr(fn_name).unwrap();
         }
-        self.build_wrap(&program_ptx, program_ptx.compile(&compiler_opts))?;
+
+        self.build_wrap(builder, &program_ptx, 
+            program_ptx.compile(&crate::str_vec!(compiler_opts))
+        ).unwrap();
+        
         let mut fn_map = HashMap::new();
-        for fn_name in &self.functions {
-            let ptx_fn = program_ptx.get_name(fn_name)?;
+        for fn_name in &builder.get_functions() {
+            let ptx_fn = program_ptx.get_name(fn_name).unwrap();
             fn_map.insert(fn_name.clone(), ptx_fn);
         }
-        Ok((program_ptx.get_ptx()?, fn_map))
-    }
-
-    // Returns string with PTX and 
-    fn get_ptx(&mut self) -> Option<(String, HashMap<String, PtxFunctionInfo>)> {
-        //let (ptx, fn_map) = self.build_ptx()?;
-
-        None
+        (fn_map, program_ptx.get_ptx().unwrap())
     }
 }
 
-impl<'a> ComputeProgramBuilder<'a> for CudaProgramBuilder<'a> {
-    fn queue(&self) -> &dyn ComputeQueue { self.queue }
-    fn compiler_opt(&mut self, opt: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.compiler_options.push(opt.to_string());
-        self
+impl<'a> ComputeQueue for CudaQueue<'a> {
+    fn device(&self) -> &dyn ComputeDevice { self.device.unwrap() }
+    fn flush(&self) {
+        self.cuda_stream.synchronize().unwrap();
     }
-    fn debug(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) { 
-        self.debug = true;
-        self.compiler_opt("-lineinfo");
-        self
+    fn build_source(&self, builder: &SourceProgramBuilder) {
+        
+        let (fn_map, ptx) = self.build_ptx(&builder);
+        println!("PTX CUDA: {}", ptx);
+
+        // let headers: Vec<_> = self.headers.iter().map(|s| s.as_str()).collect();
+        // let headers_names: Vec<_> = self.headers_names.iter().map(|s| s.as_str()).collect();
+        // let headers_names: Vec<_> = self.headers_names.iter().map(|s| s.as_str()).collect();
+        // let compiler_opts: Vec<_> = self.compiler_options.iter().map(|s| s.as_str()).collect();
+        // let program_ptx = nvrtc::NvrtcProgram::new(src, None, &headers, &headers_names)?;
+        // for fn_name in &self.functions {
+        //     program_ptx.add_expr(fn_name)?;
+        // }
+        // self.build_wrap(&program_ptx, program_ptx.compile(&compiler_opts))?;
+        // let mut fn_map = HashMap::new();
+        // for fn_name in &self.functions {
+        //     let ptx_fn = program_ptx.get_name(fn_name)?;
+        //     fn_map.insert(fn_name.clone(), ptx_fn);
+        // }
+       // println!("PTX CUDA: {}", program_ptx.get_ptx().unwrap())
+        // Ok((program_ptx.get_ptx()?, fn_map))
     }
-    fn add_header(&mut self, src: &str, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.headers.push(String::from(src));
-        self.headers_names.push(String::from(name));
-        self
-    }
-    fn add_stub_header(&mut self) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.add_header(self.vendor_header().as_str(), "/gpu_compute/vendor.h");
-        self.add_header(self.cache_header(self.debug).as_str(), "/gpu_compute/cache.h");
-        self.add_header(&include_str!("../../headers/cuda.cu"), "/gpu_compute/platform.h");
-        self
-    }
-    fn add_fn(&mut self, name: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        self.functions.push(name.to_string());
-        self
-    }
-    fn set_source(&mut self, src: &str) -> &mut (dyn ComputeProgramBuilder<'a> + 'a) {
-        if self.source.is_some() { panic!("Source already set for kernel."); }
-        self.source = Some(src.to_string());
-        self
-    }
-    fn build_source(&self) -> Result<Box<dyn ComputeProgram + 'a>, Box<Error>>{
-        let (ptx, fn_map) = self.build_ptx()?;
-        let module = Module::load_from_string(&CString::new(ptx.as_str())?)?;
-        Ok(Box::new(CudaProgram::new(self.queue, module, self.functions.clone(), Some((ptx, fn_map)) )))
+    fn get_ptx_info(&self, builder: &SourceProgramBuilder) -> Option<PtxInfo> {
+        let (fn_map, ptx) = self.build_ptx(&builder);
+        let mut info = PtxInfo::new(&ptx);
+        let module = CudaModule::new(&ptx, fn_map);
+        for fn_name in &builder.get_functions() {
+            info.add_fn(fn_name, module.get_ptx_info(fn_name));
+        }
+        Some(info)
     }
 }
-
 
 pub struct CudaProgram<'a> {
     pub queue: &'a CudaQueue<'a>,
@@ -251,21 +283,7 @@ impl<'a> ComputeProgram for CudaProgram<'a> {
             None => None,
         }
     }
-    // TODO: very ugly, do something
-    fn get_ptx_info(&self) -> Option<HashMap<String, PtxFunctionInfo>> {
-        let mut map = HashMap::with_capacity(self.functions.len());
-        for name in &self.functions {
-            let f = self.get_fn(name).unwrap();
-            let registers = Some(f.get_attribute(FunctionAttribute::NumRegisters).unwrap() as usize);
-            let mem_local = Some(f.get_attribute(FunctionAttribute::LocalSizeBytes).unwrap() as usize);
-            let mem_shared = Some(f.get_attribute(FunctionAttribute::SharedMemorySizeBytes).unwrap() as usize);
-            let mem_const = Some(f.get_attribute(FunctionAttribute::ConstSizeBytes).unwrap() as usize);
-            let max_threads = Some(f.get_attribute(FunctionAttribute::MaxThreadsPerBlock).unwrap() as usize);
-            let info = PtxFunctionInfo { registers, mem_local, mem_shared, mem_const, max_threads };
-            map.insert(name.to_string(), info);
-        }
-        Some(map)
-    }
+
 }
 
 // // Official example

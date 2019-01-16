@@ -4,8 +4,9 @@ use log::*;
 pub mod error;
 pub mod enums;
 pub mod grid;
-pub mod backend;
+pub mod function;
 pub mod program;
+pub mod backend;
 pub mod util;
 
 use self::backend::generic::{ComputeDevice, ComputePlatform};
@@ -104,7 +105,6 @@ pub fn init(){
     "#;
     let kernel = r#"
         #include "/gpu_compute/platform.h"
-        CONSTANT int pyopencl_defeat_cache_10 = 0;
         #include "world.cl"
         KERNEL void say_hi(GLOBAL_MEM unsigned int *a)
         {
@@ -119,15 +119,17 @@ pub fn init(){
 
         }
     "#;
-    let x = queue.program_builder()
+    let mut p = program::SourceProgramBuilder::new(Some("hello_world.c"))
         .debug()
-        .add_stub_header()
         .add_header(header, "world.cl")
+//        .compiler_opt(enums::CompilerOpt::AMD_TEMPS)
         .add_fn("say_hi")
         .add_fn("say_hi2")
-        .set_source(&kernel)
-        .build_source().unwrap();
-    //println!("Q: {}", x);
+        .set_source(&kernel);
+
+    println!("SOURCE: {}", p.legacy_source(&*dev));
+    let x2 = queue.build_source(&p);
+    println!("Q: {:?}", x2);
 }
 
 
